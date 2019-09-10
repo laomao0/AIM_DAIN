@@ -30,6 +30,8 @@ Our method achieves state-of-the-art performance on the Middlebury dataset.
 - GCC (Compiling PyTorch 1.0.0 extension files (.c/.cu) requires gcc = 7.4.0 and nvcc = 10.0 compilers)
 - NVIDIA GPU (We use RTX-2080 Ti with compute = 7.5, but we support compute_50/52/60/61/75 devices, should you have devices with higher compute capability, please revise [this](https://github.com/baowenbo/DAIN/blob/master/my_package/DepthFlowProjection/setup.py))
 
+The full envs is recored in AIM_DAIN/environment.yaml.
+
 ### Installation
 Download repository:
 

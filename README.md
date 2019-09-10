@@ -82,7 +82,7 @@ Make sure the dataset dirs follow the below structure.
 
 ### Downloading Results
 
-Our test results 60fps (without 15fps inputs) can be downloaded by [link]().
+Our test results 60fps (without 15fps inputs) can be downloaded by AIM challenge of [CodaLab](https//competitions.codalab.org).
     
     
 ### Test Results Generation
@@ -94,7 +94,7 @@ Modify the testset path of AIM_DAIN/src/test_AIM.py to be your path.
     AIM_Other_RESULT_UPLOAD = "/DATA/wangshen_data/AIM_challenge/test/test_15fps_upload"
 
 AIM_Other_RESULT is the path of full 60fps results without 15fps inputs.
-AIM_Other_RESULT_UPLOAD path is the 30fps results upload to [CodaLab](AIM_Other_RESULT_UPLOAD).
+AIM_Other_RESULT_UPLOAD path is the 30fps results upload to [CodaLab](https//competitions.codalab.org).
 
 The script for generating the 60fps testing results.
 

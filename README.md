@@ -51,10 +51,11 @@ Generate the Correlation package required by [PWCNet](https://github.com/NVlabs/
     $ ./build.sh
 
 ### Testing Pre-trained Models
-Make model weights dir and Middlebury dataset dir:
+Make model weights dir and AIM dataset dir:
 
     $ cd AIM_DAIN
     $ mkdir model_weights
+    $ cd model_weights
     $ mkdir test_weight
     
 Download [pretrained models](https://drive.google.com/open?id=15GyU0IFCWW7omIp9lVUNWjCFAgrGBXKS), 
@@ -66,7 +67,7 @@ put best.pth into AIM_DAIN/model_weights/test_weight dir.
 
 Download [AIM-Challenge dataset](wwww.vision.ee.ethz.ch/aim19/):
     
-Make sure the dataset dirs follows the below structure.
+Make sure the dataset dirs follow the below structure.
 
          
     root -----train/train_15fps/000,...,239/00000000.png,...
@@ -84,7 +85,7 @@ Our test results 60fps (without 15fps inputs) can be downloaded by [link]().
     
 ### Test Results Generation
 
-Modify the testset path of AIM_Challenge/src/test_AIM.py to be your path.
+Modify the testset path of AIM_DAIN/src/test_AIM.py to be your path.
 
     AIM_Other_DATA = "/DATA/wangshen_data/AIM_challenge/test/test_15fps"
     AIM_Other_RESULT = "/DATA/wangshen_data/AIM_challenge/test/test_15fps_result"

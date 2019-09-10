@@ -57,7 +57,7 @@ Make model weights dir and Middlebury dataset dir:
     $ mkdir model_weights
     $ mkdir test_weight
     
-Download [pretrained models](), 
+Download [pretrained models](https://drive.google.com/open?id=15GyU0IFCWW7omIp9lVUNWjCFAgrGBXKS), 
 
     $ cd test_weight
 

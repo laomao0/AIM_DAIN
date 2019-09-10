@@ -67,7 +67,7 @@ Download [pretrained models](https://drive.google.com/open?id=15GyU0IFCWW7omIp9l
 put best.pth into AIM_DAIN/model_weights/test_weight dir.
     
 
-Download [AIM-Challenge dataset](https://wwww.vision.ee.ethz.ch/aim19/):
+Download [AIM-Challenge dataset](https://www.vision.ee.ethz.ch/aim19/):
     
 Make sure the dataset dirs follow the below structure.
 

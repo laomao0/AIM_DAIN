@@ -41,7 +41,7 @@ Before building Pytorch extensions, be sure you have `pytorch >= 1.0.0`:
     
 Generate our PyTorch extensions:
     
-    $ cd AIM_DAIN
+    $ cd AIM_DAIN/src
     $ cd my_package 
     $ ./build.sh
 

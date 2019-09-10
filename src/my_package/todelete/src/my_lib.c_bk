@@ -1,0 +1,759 @@
+#include <TH.h>
+#include <stdbool.h>
+#include <stdio.h>
+#include <math.h>
+
+// refer to :
+// https://github.com/lmb-freiburg/flownet2/blob/master/src/caffe/layers/flow_warp_layer.cpp
+
+#define min(a,b) ((a<b)?(a):(b))
+#define max(a,b) ((a>b)?(a):(b))
+
+int InterpolationLayer_cpu_forward(
+		THFloatTensor * input1,
+		THFloatTensor * input2,
+		THFloatTensor * output
+		)
+		{
+	int error = -1;
+
+
+	int channel = input1->size[1]; //THTensor_size(state, input1, 1);
+	if(channel!=3) return error;
+	int batch = input1->size[0];//THCudaTensor_size(state, input1,0);
+	if(input2->size[0] != batch) return error;
+	if(input2->size[1] != 2) return error;
+
+	int h = input1->size[2];//THCudaTensor_size(state,input1,2);
+	int w = input1->size[3];//THCudaTensor_size(state,input1,3);
+	if(input2->size[2] != h) return error;// to add some checkpoint
+	if(input2->size[3] != w) return error;
+
+	float * input1_data =  THFloatTensor_data(input1);
+	float * input2_data = THFloatTensor_data(input2);
+	float * output_data = THFloatTensor_data(output);
+
+	int input1_b_stride = input1->stride[0];
+	int input1_c_stride = input1->stride[1];
+	int input1_h_stride = input1->stride[2];
+	int input1_w_stride = input1->stride[3];
+
+	int input2_b_stride = input2->stride[0];
+	int input2_c_stride = input2->stride[1];
+	int input2_h_stride = input2->stride[2];
+	int input2_w_stride = input2->stride[3];
+	//TODO: do we need to assert the w_stride to be 1
+	if(input1_w_stride !=1) return error;
+	if(input2_w_stride !=1) return error;
+	if(input1_b_stride != output->stride[0]) return error;
+	if(input1_c_stride != output->stride[1]) return error;
+
+
+	float fillvalue = 0.0f;//Default to be zero for the out of range position.
+	int batch_i;int h_i;int w_i;int c_i;
+	for( batch_i = 0 ; batch_i < batch; batch_i++){
+		int off = batch_i * input1_b_stride;
+		for( h_i = 0; h_i < h ; h_i ++){
+			for( w_i = 0; w_i < w; w_i ++){
+
+				//read the opticalflow
+				float fx = input2_data[batch_i * input2_b_stride + 0 * input2_c_stride + h_i * input2_h_stride + w_i];
+				float fy = input2_data[batch_i * input2_b_stride + 1 * input2_c_stride + h_i * input2_h_stride + w_i];
+
+				//get the destination position
+				float x2 = (float)(w_i) + fx;
+				float y2 = (float)(h_i) + fy;
+
+				if(x2 >= 0.0f && y2 >=0.0f && x2 < (float)w && y2  < (float)h){
+					int ix2_L = (int)(x2);
+					int iy2_T = (int)(y2);
+					int ix2_R = min(ix2_L+1, w - 1);
+					int iy2_B = min(iy2_T+1, h - 1);
+
+					float alpha = x2 - ix2_L;
+					float beta = y2  - iy2_T;
+
+					for ( c_i = 0 ; c_i  < channel; c_i++){
+						float TL = input1_data[off + c_i * input1_c_stride + iy2_T * input1_h_stride + ix2_L];
+						float TR = input1_data[off + c_i * input1_c_stride + iy2_T * input1_h_stride + ix2_R];
+						float BL = input1_data[off + c_i * input1_c_stride + iy2_B * input1_h_stride + ix2_L];
+						float BR = input1_data[off + c_i * input1_c_stride + iy2_B * input1_h_stride + ix2_R];
+
+						output_data[off + c_i * input1_c_stride + h_i * input1_h_stride + w_i] =
+							(1-alpha)*(1-beta)*TL +
+							alpha*(1-beta)*TR +
+							(1-alpha)*beta*BL +
+							alpha*beta*BR;
+					}
+
+
+				}else{
+					//the warping data is out of range, we fill it with zeros
+					for( c_i = 0 ;  c_i < channel; c_i ++){
+						output_data[off +c_i *input1_c_stride + h_i* input1_h_stride + w_i] = fillvalue;
+					}
+				}
+			}
+		}
+	}
+
+	error = 0;
+	return error;
+
+}
+
+//TODO: what is the correct order of the tensors in backward propagation although
+int InterpolationLayer_cpu_backward(
+		THFloatTensor * input1,
+		THFloatTensor * input2,
+		THFloatTensor * gradoutput,
+		THFloatTensor * gradinput1,
+		THFloatTensor * gradinput2
+		)
+		{
+	int error = -1;
+
+
+	int channel = input1->size[1]; //THCudaTensor_size(state, input1, 1);
+	if(channel!=3) return error;
+	int batch = input1->size[0];
+	if(input2->size[0] != batch) return error;
+	if(input2->size[1] != 2) return error;
+
+	int h = input1->size[2];
+	int w = input1->size[3];
+	if(input2->size[2] != h) return error;// to add some checkpoint
+	if(input2->size[3] != w) return error;
+
+	float * input1_data = THFloatTensor_data(input1);
+	float * input2_data = THFloatTensor_data(input2);
+	float * gradoutput_data = THFloatTensor_data(gradoutput);
+	float * gradinput1_data = THFloatTensor_data(gradinput1);
+	float * gradinput2_data = THFloatTensor_data(gradinput2);
+
+
+	int input1_b_stride = input1->stride[0];
+	int input1_c_stride = input1->stride[1];
+	int input1_h_stride = input1->stride[2];
+	int input1_w_stride = input1->stride[3];
+
+	int input2_b_stride = input2->stride[0];
+	int input2_c_stride = input2->stride[1];
+	int input2_h_stride = input2->stride[2];
+	int input2_w_stride = input2->stride[3];
+	//		printf("can id ");
+	//    printf("%d,%d,%d,%d\n", input1_b_stride,input1_c_stride,input1_h_stride,input1_w_stride);
+	if(input1_w_stride !=1) return error;
+	if(input2_w_stride !=1) return error;
+	//	printf("can  ");
+
+	//    int i ;
+	//clear the gradients of the input1
+	//	for ( i = 0 ; i < batch * input1_b_stride; i ++){ gradinput1_data[i] = 0;}
+	//clear the gradients of the input2
+	//	for( i = 0 ; i < batch * input2_b_stride ; i ++){ gradinput2_data[i] = 0;}
+
+	//	printf("can i ");
+	int batch_i;int h_i;int w_i;int c_i;
+
+	for( batch_i =0 ;batch_i < batch ; batch_i ++ ){
+		//	printf("%d\n",batch_i);
+		int off = batch_i * input1_b_stride;
+
+		for( h_i = 0 ; h_i< h; h_i++){
+			for( w_i = 0 ; w_i < w; w_i ++){
+
+				//read the opticalflow
+				float fx = input2_data[batch_i * input2_b_stride + 0 * input2_c_stride + h_i * input2_h_stride + w_i];
+				float fy = input2_data[batch_i * input2_b_stride + 1 * input2_c_stride + h_i * input2_h_stride + w_i];
+
+				//get the destination position
+				float x2 = (float)(w_i) + fx;
+				float y2 = (float)(h_i) + fy;
+
+				if(x2 >=  0.0f  && y2 >= 0.0f  && x2 < (float)w && y2 < (float) h){
+					int ix2_L = (int)(x2);
+					int iy2_T = (int)(y2);
+					int ix2_R = min(ix2_L+1, w - 1);
+					int iy2_B = min(iy2_T+1, h - 1);
+
+					float alpha = x2 - ix2_L;
+					float beta = y2  - iy2_T;
+
+					for ( c_i = 0 ; c_i  < channel; c_i++){
+
+						float gradoutput_value = gradoutput_data[off + c_i * input1_c_stride + h_i * input1_h_stride + w_i];
+						gradinput1_data[off + c_i * input1_c_stride + iy2_T * input1_h_stride + ix2_L] += gradoutput_value * (1-alpha)*(1-beta);
+						gradinput1_data[off + c_i * input1_c_stride + iy2_T * input1_h_stride + ix2_R] += gradoutput_value * alpha*(1-beta);
+						gradinput1_data[off + c_i * input1_c_stride + iy2_B * input1_h_stride + ix2_L] += gradoutput_value * (1-alpha)*beta;
+						gradinput1_data[off + c_i * input1_c_stride + iy2_B * input1_h_stride + ix2_R] += gradoutput_value *  alpha*beta;
+
+					}
+
+
+					float gamma  = iy2_B - y2;
+
+					float bot_diff = 0 ;
+					for( c_i = 0 ; c_i < channel;c_i ++ ){
+						float temp = 0.0f;
+						temp += gamma * (input1_data[off+ c_i * input1_c_stride + iy2_T * input1_h_stride + ix2_R] -
+								input1_data[off + c_i * input1_c_stride + iy2_T * input1_h_stride + ix2_L]);
+						temp += (1-gamma) *(input1_data[off + c_i * input1_c_stride + iy2_B * input1_h_stride + ix2_R] -
+								input1_data[off + c_i * input1_c_stride + iy2_B * input1_h_stride + ix2_L]);
+
+						float warped_diff_value = gradoutput_data[off + c_i * input1_c_stride + h_i * input1_h_stride + w_i];
+
+						bot_diff += warped_diff_value * temp;
+					}
+					//the gradients of the x direction/ horizontal direction
+					gradinput2_data[batch_i * input2_b_stride + 0 * input2_c_stride + h_i * input2_h_stride + w_i] = bot_diff;
+
+
+					gamma = ix2_R -x2;
+					bot_diff = 0;
+
+					for ( c_i = 0 ; c_i < channel ; c_i++){
+						float temp = 0.0f;
+						temp += gamma * (input1_data[off + c_i * input1_c_stride + iy2_B * input1_h_stride + ix2_L] -
+								input1_data[off + c_i * input1_c_stride + iy2_T * input1_h_stride + ix2_L ]);
+						temp += (1-gamma) * (  input1_data[off + c_i * input1_c_stride+ iy2_B * input1_h_stride + ix2_R] -
+								input1_data[off +c_i * input1_c_stride + iy2_T * input1_h_stride + ix2_R]);
+
+						float warped_diff_value = gradoutput_data[off + c_i * input1_c_stride + h_i * input1_h_stride + w_i];
+
+						bot_diff += warped_diff_value * temp;
+
+					}
+					gradinput2_data[batch_i * input2_b_stride + 1 * input2_c_stride + h_i * input2_h_stride + w_i] = bot_diff;
+
+				}
+			}
+		}
+	}
+	//    printf("Finish \n");
+
+	error = 0;
+	return error;
+
+}
+
+
+#include <TH.h>
+#include <stdbool.h>
+#include <stdio.h>
+
+// refer to :
+// https://github.com/lmb-freiburg/flownet2/blob/master/src/caffe/layers/flow_warp_layer.cpp
+
+#define min(a,b) ((a<b)?(a):(b))
+#define max(a,b) ((a>b)?(a):(b))
+
+
+int FilterInterpolationLayer_cpu_forward(
+		THFloatTensor * input1,
+		THFloatTensor * input2,
+		THFloatTensor * input3,
+		THFloatTensor * output
+		)
+		{
+	int error = -1;
+
+	int channel = input1->size[1]; //THTensor_size(state, input1, 1);
+	if(channel!=3) return error;
+	int batch = input1->size[0];//THCudaTensor_size(state, input1,0);
+	if(input2->size[0] != batch) return error;
+	if(input2->size[1] != 2) return error;
+
+	int h = input1->size[2];//THCudaTensor_size(state,input1,2);
+	int w = input1->size[3];//THCudaTensor_size(state,input1,3);
+	if(input2->size[2] != h) return error;// to add some checkpoint
+	if(input2->size[3] != w) return error;
+
+	int filter_size2 = input3->size[1];
+	int filter_size = (int)sqrt((float)filter_size2);
+	//    printf("filter size is: %d,or %f", filter_size, sqrt((float)filter_size2));
+
+	float * input1_data = THFloatTensor_data(input1);
+	float * input2_data = THFloatTensor_data(input2);
+	float * input3_data = THFloatTensor_data(input3);
+	float * output_data = THFloatTensor_data(output);
+
+	int input1_b_stride = input1->stride[0];
+	int input1_c_stride = input1->stride[1];
+	int input1_h_stride = input1->stride[2];
+	int input1_w_stride = input1->stride[3];
+
+	int input2_b_stride = input2->stride[0];
+	int input2_c_stride = input2->stride[1];
+	int input2_h_stride = input2->stride[2];
+	int input2_w_stride = input2->stride[3];
+
+	int input3_b_stride = input3->stride[0];
+	int input3_c_stride = input3->stride[1];
+	int input3_h_stride = input3->stride[2];
+	int input3_w_stride = input3->stride[3];
+	//    printf("filter tensor shape: %d,%d,%d,%d\n", input3_b_stride,input3_c_stride,input3_h_stride,input3_w_stride);
+
+	//TODO: do we need to assert the w_stride to be 1
+	if(input1_w_stride !=1) return error;
+	if(input2_w_stride !=1) return error;
+	if(input3_w_stride !=1) return error;
+	if(input1_b_stride != output->stride[0]) return error;
+	if(input1_c_stride != output->stride[1]) return error;
+
+
+
+	//    printf("cpu: input1 %f, \t  output %f \n",input1_data[0],output_data[0]);
+//	float fillvalue = 0.0f;//Default to be zero for the out of range position.
+	int batch_i;int h_i;int w_i;int c_i;
+	int filter_i,filter_j;
+
+	for( batch_i = 0 ; batch_i < batch; batch_i++){
+		int off = batch_i * input1_b_stride;
+		for( h_i = 0; h_i < h ; h_i ++){
+			for( w_i = 0; w_i < w; w_i ++){
+
+				//read the opticalflow
+				float fx = input2_data[batch_i * input2_b_stride + 0 * input2_c_stride + h_i * input2_h_stride + w_i];
+				float fy = input2_data[batch_i * input2_b_stride + 1 * input2_c_stride + h_i * input2_h_stride + w_i];
+
+				//get the destination position
+				float x2 = (float)(w_i) + fx;
+				float y2 = (float)(h_i) + fy;
+
+				//Guarrantee that the center position is in-border.
+				if(x2 >= 0.0f && y2 >=0.0f && x2 <=  (float) (w -1) && y2  <= (float) (h-1)
+				        && fabs(fx) < (float)(w)/2.0f && fabs(fy) < (float)(h)/2.0f){
+
+					//TODO: what if ix2_L goes out of the border, then
+					int ix2_L = (int)(x2) + 1 - (int)(filter_size/2); // the very left coordinate though it may goes out border.
+					int iy2_T = (int)(y2) + 1 - (int)(filter_size/2); // the very top coordinate
+					int ix2_R = ix2_L + filter_size; // the very right coordinate
+					int iy2_B = iy2_T + filter_size; // the very bottom coordinate
+
+					//TODO: here is a bug that if the iy2_B or ix2_R gets out of the border, than there is no enough pixels to warp the target one.
+					for ( c_i = 0 ; c_i  < channel; c_i++){
+						for (filter_j = iy2_T ; filter_j < iy2_B; filter_j++){
+							int _filter_j = min(max(0, filter_j),h - 1); // only used for input1
+
+							for(filter_i = ix2_L; filter_i < ix2_R; filter_i++){
+								int _filter_i = min(max(0, filter_i),w - 1);// only used for input1
+
+								output_data [off + c_i * input1_c_stride + h_i * input1_h_stride + w_i] +=
+									input1_data [off + c_i * input1_c_stride + _filter_j * input1_h_stride + _filter_i] *
+									input3_data [batch_i * input3_b_stride + ((filter_j - iy2_T) * filter_size + (filter_i - ix2_L)) * input3_c_stride + h_i * input3_h_stride + w_i] *
+//									exp( - (fabs((float)(filter_j) - y2 ) + fabs((float)(filter_i)  - x2))/(float)(filter_size) ) ; // the distance weight.
+									exp( - (fabs((float)(filter_j) - y2 ) + fabs((float)(filter_i)  - x2)) ) ; // the distance weight.
+
+//																if(w_i == 141 && h_i == 316 && c_i == 0 ){
+//printf("gpu: %f, %f,%f,%f\n",input1_data[off + c_i *  input1_c_stride +  _filter_j * input1_h_stride + _filter_i ] ,
+//input3_data [batch_i * input3_b_stride + ((filter_j - iy2_T) * filter_size + (filter_i - ix2_L)) * input3_c_stride + h_i * input3_h_stride + w_i],
+//exp( -(fabs((float) filter_j - y2) + fabs((float) filter_i - x2)) / (float)(filter_size)),
+//output_data[off + c_i * input1_c_stride + h_i * input1_h_stride + w_i ]
+// );
+//}
+							}
+						}
+					}
+
+				}else{
+					//the warping data is out of range, we fill it with zeros
+					for( c_i = 0 ;  c_i < channel; c_i ++){
+						output_data[off + c_i *input1_c_stride + h_i* input1_h_stride + w_i] = input1_data[off + c_i* input1_c_stride+ h_i * input1_h_stride + w_i];
+					}
+				}
+			}
+		}
+	}
+	//    printf("cpu: input1 %f, \t  output %f \n",input1_data[0],output_data[0]);
+
+	error = 0;
+	return error;
+
+}
+
+//TODO: what is the correct order of the tensors in backward propagation although
+int FilterInterpolationLayer_cpu_backward(
+		THFloatTensor * input1,
+		THFloatTensor * input2,
+		THFloatTensor * input3,
+		THFloatTensor * gradoutput,
+		THFloatTensor * gradinput1,
+		THFloatTensor * gradinput2,
+		THFloatTensor * gradinput3
+		)
+		{
+	int error = -1;
+
+
+	int channel = input1->size[1]; //THCudaTensor_size(state, input1, 1);
+	if(channel!=3) return error;
+	int batch = input1->size[0];
+	if(input2->size[0] != batch) return error;
+	if(input2->size[1] != 2) return error;
+
+	int h = input1->size[2];
+	int w = input1->size[3];
+	if(input2->size[2] != h) return error;// to add some checkpoint
+	if(input2->size[3] != w) return error;
+	int filter_size2 = input3->size[1];
+	int filter_size = (int)sqrt((float)filter_size2);
+	//    printf("filter size is: %d,or %f", filter_size, sqrt((float)filter_size2));
+
+	float * input1_data = THFloatTensor_data(input1);
+	float * input2_data = THFloatTensor_data(input2);
+	float * input3_data = THFloatTensor_data(input3);
+	float * gradoutput_data = THFloatTensor_data(gradoutput);
+	float * gradinput1_data = THFloatTensor_data(gradinput1);
+	float * gradinput2_data = THFloatTensor_data(gradinput2);
+	float * gradinput3_data = THFloatTensor_data(gradinput3);
+
+
+	int input1_b_stride = input1->stride[0];
+	int input1_c_stride = input1->stride[1];
+	int input1_h_stride = input1->stride[2];
+	int input1_w_stride = input1->stride[3];
+
+	int input2_b_stride = input2->stride[0];
+	int input2_c_stride = input2->stride[1];
+	int input2_h_stride = input2->stride[2];
+	int input2_w_stride = input2->stride[3];
+
+	int input3_b_stride = input3->stride[0];
+	int input3_c_stride = input3->stride[1];
+	int input3_h_stride = input3->stride[2];
+	int input3_w_stride = input3->stride[3];
+	//    printf("filter tensor shape: %d,%d,%d,%d\n", input3_b_stride,input3_c_stride,input3_h_stride,input3_w_stride);
+
+	//		printf("can id ");
+	//    printf("%d,%d,%d,%d\n", input1_b_stride,input1_c_stride,input1_h_stride,input1_w_stride);
+	if(input1_w_stride !=1) return error;
+	if(input2_w_stride !=1) return error;
+	if(input3_w_stride !=1) return error;
+	//	printf("can  ");
+
+//	    int i ;
+//	//clear the gradients of the input1
+//		for ( i = 0 ; i < batch * input1_b_stride; i ++){ gradinput1_data[i] = 0;}
+//		for( i = 0 ; i < batch * input2_b_stride ; i ++){ gradinput2_data[i] = 0;}
+//		for( i = 0 ; i < batch * input3_b_stride ; i ++){ gradinput3_data[i] = 0;}
+
+	//	printf("can i ");
+	int batch_i;int h_i;int w_i;int c_i;
+	int filter_i,filter_j;
+
+	for( batch_i =0 ;batch_i < batch ; batch_i ++ ){
+		//	printf("%d\n",batch_i);
+		int off = batch_i * input1_b_stride;
+
+		for( h_i = 0 ; h_i < h; h_i++){
+			for( w_i = 0 ; w_i < w; w_i ++){
+
+				//read the opticalflow
+				float fx = input2_data[batch_i * input2_b_stride + 0 * input2_c_stride + h_i * input2_h_stride + w_i];
+				float fy = input2_data[batch_i * input2_b_stride + 1 * input2_c_stride + h_i * input2_h_stride + w_i];
+
+				//get the destination position
+				float x2 = (float)(w_i) + fx;
+				float y2 = (float)(h_i) + fy;
+
+				if(x2 >=  0.0f  && y2 >= 0.0f  && x2 <= (float)(w -1) && y2 <= (float) (h -1)
+				        && fabs(fx) < (float)(w)/2.0f && fabs(fy) < (float)(h)/2.0f){
+
+//                if (w_i == w/2 && h_i == h/2 && batch_i == 0 ){
+//                    printf("%f,%f,%f,%f\n",fx ,fy,x2,y2);
+//                }
+
+					int ix2_L = (int)(x2) + 1 - (int) (filter_size/2);
+					int iy2_T = (int)(y2) + 1 - (int) (filter_size/2);
+					int ix2_R = ix2_L + filter_size ;
+					int iy2_B = iy2_T + filter_size ;
+
+					/***
+					  Step 1: calculate the gradients for input1, i.e. the input image;
+					 ***/
+					for ( c_i = 0 ; c_i  < channel; c_i++){
+
+						float gradoutput_value = gradoutput_data[off + c_i * input1_c_stride + h_i * input1_h_stride + w_i];
+
+						for (filter_j = iy2_T; filter_j < iy2_B ; filter_j ++ ){
+							int _filter_j = min(max(0, filter_j),  h - 1);
+							for(filter_i = ix2_L; filter_i< ix2_R ; filter_i++){
+								int _filter_i = min(max(0,filter_i), w - 1);
+
+								gradinput1_data[off + c_i * input1_c_stride + _filter_j * input1_h_stride + _filter_i] +=
+									gradoutput_value *
+									input3_data [batch_i * input3_b_stride +((filter_j - iy2_T) * filter_size + (filter_i-ix2_L)) * input3_c_stride + h_i * input3_h_stride + w_i] *
+//									exp( -(fabs((float)filter_j - y2) + fabs((float)filter_i - x2))/(float)filter_size);
+									exp( -(fabs((float)filter_j - y2) + fabs((float)filter_i - x2)));
+
+							}
+						}
+					}
+
+					/***
+					  Step 2: calculate the gradients for input2, i.e., the optical flow,
+					  STEP 2.1: for the x/horizonotal direction.
+					 ***/
+					float bot_diff = 0 ;
+					for( c_i = 0 ; c_i < channel;c_i ++ ){
+
+						float gradoutput_value = gradoutput_data[off + c_i * input1_c_stride + h_i * input1_h_stride + w_i];
+
+						for (filter_j = iy2_T; filter_j < iy2_B ; filter_j ++ ){
+							int _filter_j = min(max(0, filter_j),  h - 1);
+							for(filter_i = ix2_L; filter_i< ix2_R ; filter_i++){
+								int _filter_i = min(max(0,filter_i), w - 1);
+
+								bot_diff +=
+									gradoutput_value *
+									input1_data[off + c_i * input1_c_stride + _filter_j * input1_h_stride + _filter_i] *
+									input3_data [batch_i * input3_b_stride + ((filter_j - iy2_T) * filter_size + (filter_i - ix2_L)) * input3_c_stride + h_i * input3_h_stride + w_i] *
+//									exp( - (fabs((float) filter_j - y2)+fabs((float)filter_i - x2))/(float)filter_size ) *
+//									((float)filter_i > x2 ? 1.0f: -1.0f)/(float)filter_size;
+	                                exp( - (fabs((float) filter_j - y2)+fabs((float)filter_i - x2)) ) *
+									((float)filter_i > x2 ? 1.0f: -1.0f);
+								//TODO: the problem is at the exact integer position i.e. filter_i == x2, in which is the gradient descent direction ???
+							}
+						}
+					}
+					//the gradients of the x direction/ horizontal direction
+					gradinput2_data[batch_i * input2_b_stride + 0 * input2_c_stride + h_i * input2_h_stride + w_i] = bot_diff;
+
+					/***
+					  STEP 2.2: for the x/horizonotal direction.
+					 ***/
+					bot_diff = 0 ;
+					for ( c_i = 0 ; c_i < channel ; c_i++){
+						float gradoutput_value = gradoutput_data[off + c_i * input1_c_stride + h_i * input1_h_stride + w_i];
+						for (filter_j = iy2_T; filter_j < iy2_B ; filter_j ++ ){
+							int _filter_j = min(max(0, filter_j),  h - 1);
+							for(filter_i = ix2_L; filter_i< ix2_R ; filter_i++){
+								int _filter_i = min(max(0,filter_i), w - 1);
+
+								bot_diff+=
+									gradoutput_value *
+									input1_data[off + c_i * input1_c_stride + _filter_j * input1_h_stride + _filter_i] *
+									input3_data [batch_i * input3_b_stride + ((filter_j - iy2_T ) * filter_size + (filter_i - ix2_L)) * input3_c_stride + h_i * input3_h_stride + w_i] *
+//									exp( - (fabs((float)filter_j - y2) + fabs((float)filter_i - x2))/(float)filter_size) *
+//									((float)filter_j > y2 ? 1.0f: -1.0f)/ (float)filter_size ;
+									exp( - (fabs((float)filter_j - y2) + fabs((float)filter_i - x2))) *
+									((float)filter_j > y2 ? 1.0f: -1.0f) ;
+
+							}
+						}
+					}
+					gradinput2_data[batch_i * input2_b_stride + 1 * input2_c_stride + h_i * input2_h_stride + w_i] = bot_diff;
+
+					/***
+					  STEP 3: calculate the gradients for input3, i.e. the filter
+
+					 ***/
+					for (c_i = 0 ; c_i < channel; c_i ++ ){
+						float gradoutput_value = gradoutput_data[off + c_i * input1_c_stride + h_i * input1_h_stride + w_i];
+
+						for (filter_j = iy2_T; filter_j < iy2_B ; filter_j ++ ){
+							int _filter_j = min(max(0, filter_j),  h - 1);
+							for(filter_i = ix2_L; filter_i< ix2_R ; filter_i++){
+								int _filter_i = min(max(0,filter_i), w - 1);
+
+								gradinput3_data[ batch_i * input3_b_stride + ((filter_j - iy2_T) * filter_size + (filter_i - ix2_L)) * input3_c_stride + h_i * input3_h_stride + w_i] +=
+									gradoutput_value *
+									input1_data[off + c_i * input1_c_stride + _filter_j * input1_h_stride + _filter_i ] *
+//									exp( -(fabs((float)filter_j - y2)+ fabs((float)filter_i - x2))/(float) filter_size) ;
+									exp( -(fabs((float)filter_j - y2)+ fabs((float)filter_i - x2))) ;
+
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+
+	error = 0;
+	return error;
+
+}
+
+
+int FlowProjectionLayer_cpu_forward(
+		THFloatTensor * input1,
+        THFloatTensor * count,
+		THFloatTensor * output
+		)
+{
+//printf("fddfs\n");
+	int error = -1;
+
+	int channel = input1->size[1]; //THTensor_size(state, input1, 1);
+	if(channel!=2) return error;
+	//printf("1\n");
+	int batch = input1->size[0];//THCudaTensor_size(state, input1,0);
+
+	int h = input1->size[2];//THCudaTensor_size(state,input1,2);
+	int w = input1->size[3];//THCudaTensor_size(state,input1,3);
+	if(count->size[2] != h) return error;// to add some checkpoint
+	//printf("2\n");
+	if(count->size[3] != w) return error;//printf("3\n");
+
+	float * input1_data = THFloatTensor_data(input1);
+    float * count_data = THFloatTensor_data(count);
+	float * output_data = THFloatTensor_data(output);
+
+	int input1_b_stride = input1->stride[0];
+	int input1_c_stride = input1->stride[1];
+	int input1_h_stride = input1->stride[2];
+	int input1_w_stride = input1->stride[3];
+
+	int count_b_stride = count->stride[0];
+//	int count_c_stride = count->stride[1];
+	int count_h_stride = count->stride[2];
+	int count_w_stride = count->stride[3];
+	//TODO: do we need to assert the w_stride to be 1
+	if(input1_w_stride !=1) return error;//printf("4\n");
+	if(input1_b_stride != output->stride[0]) return error;//printf("5\n");
+	if(input1_c_stride != output->stride[1]) return error;//printf("6\n");
+	if(count_w_stride !=1) return error;//printf("7\n");
+
+	    //printf("cpu: input1 %f, \t  output %f \n",input1_data[0],output_data[0]);
+//	float fillvalue = 0.0f;//Default to be zero for the out of range position.
+	int batch_i;int h_i;int w_i;
+
+	for( batch_i = 0 ; batch_i < batch; batch_i++){
+		int off = batch_i * input1_b_stride;
+		for( h_i = 0; h_i < h ; h_i ++){
+			for( w_i = 0; w_i < w; w_i ++){
+                float fx = input1_data[ off + 0 * input1_c_stride + h_i * input1_h_stride + w_i];
+                float fy = input1_data[ off + 1 * input1_c_stride + h_i * input1_h_stride + w_i];
+
+                float x2 = (float)( w_i ) + fx;
+                float y2 = (float)( h_i ) + fy;
+
+                if (x2 >= 0.0f && y2 >= 0.0f && x2 <= (float)(w-1) && y2 <= (float) (h-1)){
+                    int ix2_L = (int)(x2);
+					int iy2_T = (int)(y2);
+					int ix2_R = min(ix2_L+1, w - 1);
+					int iy2_B = min(iy2_T+1, h - 1);
+
+                    output_data[off + 0 * input1_c_stride + iy2_T * input1_h_stride + ix2_L ] += - fx;
+                    output_data[off + 0 * input1_c_stride + iy2_T * input1_h_stride + ix2_R ] += - fx;
+                    output_data[off + 0 * input1_c_stride + iy2_B * input1_h_stride + ix2_L ] += - fx;
+                    output_data[off + 0 * input1_c_stride + iy2_B * input1_h_stride + ix2_R ] += - fx;
+
+                    output_data[off + 1 * input1_c_stride + iy2_T * input1_h_stride + ix2_L ] += - fy;
+                    output_data[off + 1 * input1_c_stride + iy2_T * input1_h_stride + ix2_R ] += - fy;
+                    output_data[off + 1 * input1_c_stride + iy2_B * input1_h_stride + ix2_L ] += - fy;
+                    output_data[off + 1 * input1_c_stride + iy2_B * input1_h_stride + ix2_R ] += - fy;
+
+                    count_data[batch_i * count_b_stride + 0 + iy2_T * count_h_stride + ix2_L] += 1.0f;
+                    count_data[batch_i * count_b_stride + 0 + iy2_T * count_h_stride + ix2_R] += 1.0f;
+                    count_data[batch_i * count_b_stride + 0 + iy2_B * count_h_stride + ix2_L] += 1.0f;
+                    count_data[batch_i * count_b_stride + 0 + iy2_B * count_h_stride + ix2_R] += 1.0f;
+                }
+			}
+        }
+    }
+	for( batch_i = 0 ; batch_i < batch; batch_i++){
+		int off = batch_i * input1_b_stride;
+		for( h_i = 0; h_i < h ; h_i ++){
+			for( w_i = 0; w_i < w; w_i ++){
+                float temp = count_data[batch_i * count_b_stride + 0 + h_i * count_h_stride + w_i] ;
+                if(temp > 0.0f){
+                    output_data[off + 0 * input1_c_stride + h_i * input1_h_stride + w_i ] /= temp;
+                    output_data[off + 1 * input1_c_stride + h_i * input1_h_stride + w_i ] /= temp;
+                }
+			}
+        }
+    }
+	error = 0;
+	return error;
+
+}
+
+int FlowProjectionLayer_cpu_backward(
+		THFloatTensor * input1,
+        THFloatTensor * count,
+		THFloatTensor * gradoutput,
+		THFloatTensor * gradinput1
+		)
+{
+
+	int error = -1;
+
+	int channel = input1->size[1]; //THTensor_size(state, input1, 1);
+	if(channel!=2) return error;
+	int batch = input1->size[0];//THCudaTensor_size(state, input1,0);
+
+	int h = input1->size[2];//THCudaTensor_size(state,input1,2);
+	int w = input1->size[3];//THCudaTensor_size(state,input1,3);
+	if(count->size[2] != h) return error;// to add some checkpoint
+	if(count->size[3] != w) return error;
+
+	float * input1_data = THFloatTensor_data(input1);
+    float * count_data = THFloatTensor_data(count);
+	float * gradoutput_data = THFloatTensor_data(gradoutput);
+	float * gradinput1_data = THFloatTensor_data(gradinput1);
+
+	int input1_b_stride = input1->stride[0];
+	int input1_c_stride = input1->stride[1];
+	int input1_h_stride = input1->stride[2];
+	int input1_w_stride = input1->stride[3];
+
+	int count_b_stride = count->stride[0];
+//	int count_c_stride = count->stride[1];
+	int count_h_stride = count->stride[2];
+	int count_w_stride = count->stride[3];
+	//TODO: do we need to assert the w_stride to be 1
+	if(input1_w_stride !=1) return error;
+	if(count_w_stride !=1) return error;
+
+	//    printf("cpu: input1 %f, \t  output %f \n",input1_data[0],output_data[0]);
+//	float fillvalue = 0.0f;//Default to be zero for the out of range position.
+	int batch_i;int h_i;int w_i;
+
+	for( batch_i = 0 ; batch_i < batch; batch_i++){
+		int off = batch_i * input1_b_stride;
+		for( h_i = 0; h_i < h ; h_i ++){
+			for( w_i = 0; w_i < w; w_i ++){
+                float fx = input1_data[ off + 0 * input1_c_stride + h_i * input1_h_stride + w_i];
+                float fy = input1_data[ off + 1 * input1_c_stride + h_i * input1_h_stride + w_i];
+
+                float x2 = (float)( w_i ) + fx;
+                float y2 = (float)( h_i ) + fy;
+
+                if (x2 >= 0.0f && y2 >= 0.0f && x2 <= (float)(w-1) && y2 <= (float) (h-1)){
+                    int ix2_L = (int)(x2);
+					int iy2_T = (int)(y2);
+					int ix2_R = min(ix2_L+1, w - 1);
+					int iy2_B = min(iy2_T+1, h - 1);
+
+                    int iu_offset = off + 0 * input1_c_stride + h_i * input1_h_stride + w_i;
+                    gradinput1_data[iu_offset] += - gradoutput_data[off + 0 * input1_c_stride + iy2_T * input1_h_stride + ix2_L]/
+                                                    count_data[batch_i * count_b_stride + 0 + iy2_T * count_h_stride + ix2_L] ;
+                    gradinput1_data[iu_offset] += -gradoutput_data[off + 0 * input1_c_stride + iy2_T * input1_h_stride + ix2_R]/
+                                                    count_data[batch_i * count_b_stride + 0 + iy2_T * count_h_stride + ix2_R]    ;
+                    gradinput1_data[iu_offset] += -  gradoutput_data[off + 0 * input1_c_stride + iy2_B * input1_h_stride + ix2_L]/
+                                                    count_data[batch_i * count_b_stride + 0 + iy2_B * count_h_stride + ix2_L]   ;
+                    gradinput1_data[iu_offset] += -  gradoutput_data[off + 0 * input1_c_stride + iy2_B * input1_h_stride + ix2_R]/
+                                                    count_data[batch_i * count_b_stride + 0 + iy2_B * count_h_stride + ix2_R]  ;
+
+                    int iv_offset = off + 1 * input1_c_stride + h_i * input1_h_stride + w_i;
+                    gradinput1_data[iv_offset] += -   gradoutput_data[off + 1 * input1_c_stride + iy2_T * input1_h_stride + ix2_L]/
+                                                       count_data[batch_i * count_b_stride + 0 + iy2_T * count_h_stride + ix2_L]  ;
+                    gradinput1_data[iv_offset] += - gradoutput_data[off + 1 * input1_c_stride + iy2_T * input1_h_stride + ix2_R]/
+                                                    count_data[batch_i * count_b_stride + 0 + iy2_T * count_h_stride + ix2_R]  ;
+                    gradinput1_data[iv_offset] += - gradoutput_data[off + 1 * input1_c_stride + iy2_B * input1_h_stride + ix2_L]/
+                                                     count_data[batch_i * count_b_stride + 0 + iy2_B * count_h_stride + ix2_L]   ;
+                    gradinput1_data[iv_offset] += - gradoutput_data[off + 1 * input1_c_stride + iy2_B * input1_h_stride + ix2_R]/
+                                                      count_data[batch_i * count_b_stride + 0 + iy2_B * count_h_stride + ix2_R];
+
+                }
+			}
+        }
+    }
+
+	error = 0;
+	return error;
+
+}

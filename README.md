@@ -41,7 +41,7 @@ Before building Pytorch extensions, be sure you have `pytorch >= 1.0.0`:
     
 Generate our PyTorch extensions:
     
-    $ cd AIM_Challenge
+    $ cd AIM_DAIN
     $ cd my_package 
     $ ./build.sh
 
@@ -53,7 +53,7 @@ Generate the Correlation package required by [PWCNet](https://github.com/NVlabs/
 ### Testing Pre-trained Models
 Make model weights dir and Middlebury dataset dir:
 
-    $ cd AIM_Challenge
+    $ cd AIM_DAIN
     $ mkdir model_weights
     $ mkdir test_weight
     
@@ -61,7 +61,7 @@ Download [pretrained models](),
 
     $ cd test_weight
 
-put best.pth into AIM_Challenge/model_weights/test_weight dir.
+put best.pth into AIM_DAIN/model_weights/test_weight dir.
     
 
 Download [AIM-Challenge dataset](wwww.vision.ee.ethz.ch/aim19/):
@@ -95,7 +95,7 @@ AIM_Other_RESULT_UPLOAD path is the 30fps results upload to [CodaLab](AIM_Other_
 
 The script for generating the 60fps testing results.
 
-    $ cd AIM_Challenge
+    $ cd AIM_DAIN
     $ cd src
     $ ./run_15_to_60fps_testset.bash 0
     
@@ -105,11 +105,11 @@ where 0 is the GPU index. For 4 GPUs, it can select from {0,1,2,3}.
     
 Run the training script:
 
-    $ cd AIM_Challenge
+    $ cd AIM_DAIN
     $ cd src
     $ ./train.bash 0 weight_name
     
-where 0 is the GPU index, weight_name is the path, i.e. AIM_Challenge/model_weights/weight_name, to
+where 0 is the GPU index, weight_name is the path, i.e. AIM_DAIN/model_weights/weight_name, to
 save the new trained weights.
 
 

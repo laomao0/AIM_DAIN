@@ -82,7 +82,7 @@ Make sure the dataset dirs follow the below structure.
 
 ### Downloading Results
 
-Our test results 60fps (without 15fps inputs) can be downloaded by AIM challenge of [CodaLab](https://competitions.codalab.org).
+Our test results 60fps (without 15fps inputs) can be downloaded by [Link](https://1drv.ms/u/s!Amp1hYNBxxT5g_w-VXbXeeo8xPp1cA?e=0q3y88).
     
     
 ### Test Results Generation

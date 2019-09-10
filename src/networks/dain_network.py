@@ -91,17 +91,22 @@ class DAIN(torch.nn.Module):
 
         self.flowmethod = flowmethod
         if flowmethod == 0 :
-            self.flownets = models.__dict__['flownets']("models/flownets_pytorch.pth") # for estimating the flow
+            # self.flownets = models.__dict__['flownets']("models/flownets_pytorch.pth") # for estimating the flow
+            self.flownets = models.__dict__['flownets']() # for estimating the flow
             self.div_flow = 20.0
         elif flowmethod == 1:
             self.flownets = spynet.Network()
             self.div_flow = 1 # No scaling is used in SPynet
         elif flowmethod == 2:
-            self.flownets = PWCNet.__dict__['pwc_dc_net']("PWCNet/pwc_net.pth.tar")
+            # self.flownets = PWCNet.__dict__['pwc_dc_net']("PWCNet/pwc_net.pth.tar")
+            self.flownets = PWCNet.__dict__['pwc_dc_net']()
             self.div_flow = 20.0
 
+
         #extract depth information
-        self.depthNet=MegaDepth.__dict__['HourGlass']("MegaDepth/checkpoints/test_local/best_generalization_net_G.pth")
+        # self.depthNet=MegaDepth.__dict__['HourGlass']("MegaDepth/checkpoints/test_local/best_generalization_net_G.pth")
+        self.depthNet = MegaDepth.__dict__['HourGlass']()
+
 
         self.save_which = save_which
 

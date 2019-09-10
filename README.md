@@ -33,7 +33,7 @@ Our method achieves state-of-the-art performance on the Middlebury dataset.
 ### Installation
 Download repository:
 
-    $ git clone https://github.com/laomao0/AIM_Challenge.git
+    $ git clone https://github.com/laomao0/AIM_DAIN.git
 
 Before building Pytorch extensions, be sure you have `pytorch >= 1.0.0`:
     
